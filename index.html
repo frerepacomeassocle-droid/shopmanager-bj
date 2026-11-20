@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f7b4f">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>ShopManager BJ</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:system-ui,-apple-system,Roboto,Arial,sans-serif;background:#f2f5f3;color:#1c2b24;padding-bottom:70px}
+header{background:#0f7b4f;color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:19px}
+header small{opacity:.85}
+main{padding:12px;max-width:640px;margin:0 auto}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fff;display:flex;border-top:1px solid #d9e2dd;z-index:5}
+nav button{flex:1;border:0;background:none;padding:10px 2px;font-size:11px;color:#6b7c74}
+nav button b{display:block;font-size:20px;font-weight:400}
+nav button.on{color:#0f7b4f;font-weight:700}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.stat{background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.stat span{font-size:12px;color:#6b7c74}
+.stat b{display:block;font-size:17px;margin-top:4px}
+.pos{color:#0f7b4f}.neg{color:#c0392b}
+h3{margin:14px 0 8px;font-size:15px}
+.btn{background:#0f7b4f;color:#fff;border:0;border-radius:10px;padding:12px 14px;font-size:15px;width:100%}
+.btn.ghost{background:#e6ece8;color:#1c2b24}
+.btn.danger{background:#c0392b;margin-top:10px}
+.btn.small{width:auto;padding:8px 12px;font-size:13px}
+.row{display:flex;gap:8px;margin-top:14px}
+.line{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.muted{color:#6b7c74;font-size:13px}
+.tag{display:inline-block;background:#fdecea;color:#c0392b;border-radius:6px;padding:2px 6px;font-size:12px}
+.tag.ok{background:#e3f4ea;color:#0f7b4f}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;z-index:10}
+.sheet{background:#fff;width:100%;max-height:90vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px;max-width:640px;margin:0 auto}
+.sheet h2{margin:0 0 6px;font-size:18px}
+label{display:block;margin:10px 0 4px;font-size:13px;color:#4a5c54}
+input,select{width:100%;padding:11px;border:1px solid #cdd8d2;border-radius:8px;font-size:16px;background:#fff}
+.empty{text-align:center;color:#6b7c74;padding:24px 8px}
+</style>
+</head>
+<body>
+<header><h1>ShopManager BJ</h1><small id="sub"></small></header>
+<main id="view"></main>
+<nav id="nav"></nav>
+<div id="modal"></div>
+
+<script>
+const KEY='shopmanager_bj_v1';
+let db=load();
+let tab='home';
+
+function load(){
+  try{const d=JSON.parse(localStorage.getItem(KEY));
+    if(d&&Array.isArray(d.products))return{products:d.products,sales:d.sales||[],expenses:d.expenses||[],clients:d.clients||[]};
+  }catch(e){}
+  return{products:[],sales:[],expenses:[],clients:[]};
+}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(db));}
+  catch(e){alert("Impossible d'enregistrer les données sur ce téléphone.");}
+}
+const $=s=>document.querySelector(s);
+const fcfa=n=>Math.round(n||0).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g,' ')+' FCFA';
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const num=id=>{const v=parseFloat($(id).value);return isNaN(v)?0:v;};
+const sum=(a,f)=>a.reduce((t,x)=>t+f(x),0);
+const fdate=d=>d.split('-').reverse().join('/');
+
+function setTab(t){tab=t;render();window.scrollTo(0,0);}
+function render(){
+  const tabs=[['home','🏠','Accueil'],['products','📦','Produits'],['sales','🛒','Ventes'],['expenses','💸','Dépenses'],['clients','👥','Clients']];
+  $('#nav').innerHTML=tabs.map(t=>`<button class="${tab===t[0]?'on':''}" onclick="setTab('${t[0]}')"><b>${t[1]}</b>${t[2]}</button>`).join('');
+  $('#sub').textContent=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+  ({home:viewHome,products:viewProducts,sales:viewSales,expenses:viewExpenses,clients:viewClients})[tab]();
+}
+
+/* ---------- Modal ---------- */
+function openModal(title,body,onSave,label){
+  $('#modal').innerHTML=`<div class="ov" onclick="if(event.target===this)closeModal()"><div class="sheet"><h2>${title}</h2>${body}<div class="row"><button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" id="ok">${label||'Enregistrer'}</button></div></div></div>`;
+  $('#ok').onclick=onSave;
+}
+function closeModal(){$('#modal').innerHTML='';}
+
+/* ---------- Accueil ---------- */
+function clientDebt(id){return sum(db.sales.filter(s=>s.clientId===id&&!s.paid),s=>s.total);}
+function viewHome(){
+  const t=today(),m=t.slice(0,7);
+  const sT=db.sales.filter(s=>s.date===t),sM=db.sales.filter(s=>s.date.slice(0,7)===m);
+  const exM=sum(db.expenses.filter(e=>e.date.slice(0,7)===m),e=>e.amount);
+  const profM=sum(sM,s=>s.profit),net=profM-exM;
+  const debts=sum(db.clients,c=>clientDebt(c.id));
+  const stockVal=sum(db.products,p=>p.stock*p.cost);
+  const low=db.products.filter(p=>p.stock<=p.min);
+  $('#view').innerHTML=`
+  <div class="grid">
+    <div class="stat"><span>Ventes aujourd'hui</span><b>${fcfa(sum(sT,s=>s.total))}</b></div>
+    <div class="stat"><span>Bénéfice aujourd'hui</span><b class="pos">${fcfa(sum(sT,s=>s.profit))}</b></div>
+    <div class="stat"><span>Ventes du mois</span><b>${fcfa(sum(sM,s=>s.total))}</b></div>
+    <div class="stat"><span>Dépenses du mois</span><b class="neg">${fcfa(exM)}</b></div>
+  </div>
+  <div class="card"><div class="line"><span>Bénéfice net du mois</span><b class="${net>=0?'pos':'neg'}">${fcfa(net)}</b></div>
+    <div class="muted">Bénéfice sur ventes − dépenses</div></div>
+  <div class="grid">
+    <div class="stat"><span>Dettes clients</span><b>${fcfa(debts)}</b></div>
+    <div class="stat"><span>Valeur du stock</span><b>${fcfa(stockVal)}</b></div>
+  </div>
+  <h3>Stock faible</h3>
+  ${low.length?low.map(p=>`<div class="card line"><span>${esc(p.name)}</span><span class="tag">${p.stock} restant(s)</span></div>`).join(''):'<div class="card muted">Aucun produit en stock faible.</div>'}
+  <h3>Sauvegarde</h3>
+  <div class="row"><button class="btn ghost" onclick="backup()">Exporter</button><button class="btn ghost" onclick="$('#restoreFile').click()">Restaurer</button></div>
+  <input type="file" id="restoreFile" accept=".json,application/json" style="display:none" onchange="restore(this)">`;
+}
+function backup(){
+  const b=new Blob([JSON.stringify(db)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='shopmanager-sauvegarde-'+today()+'.json';document.body.appendChild(a);a.click();a.remove();
+}
+function restore(inp){
+  const f=inp.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{
+    const d=JSON.parse(r.result);
+    if(!Array.isArray(d.products))throw 0;
+    if(!confirm('Remplacer toutes les données actuelles par cette sauvegarde ?'))return;
+    db={products:d.products,sales:d.sales||[],expenses:d.expenses||[],clients:d.clients||[]};
+    save();render();alert('Sauvegarde restaurée.');
+  }catch(e){alert('Fichier de sauvegarde invalide.');}};
+  r.readAsText(f);
+}
+
+/* ---------- Produits ---------- */
+function viewProducts(){
+  $('#view').innerHTML=`<button class="btn" onclick="productForm()">+ Nouveau produit</button><div style="height:10px"></div>`+
+  (db.products.length?db.products.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`
+  <div class="card" onclick="productForm('${p.id}')">
+    <div class="line"><b>${esc(p.name)}</b><span class="tag ${p.stock>p.min?'ok':''}">Stock : ${p.stock}</span></div>
+    <div class="muted">Achat ${fcfa(p.cost)} · Vente ${fcfa(p.price)} · Marge ${fcfa(p.price-p.cost)}</div>
+    <div class="row" style="margin-top:8px"><button class="btn ghost small" onclick="event.stopPropagation();addStock('${p.id}')">+ Ajouter du stock</button></div>
+  </div>`).join(''):'<div class="empty">Aucun produit.<br>Ajoutez votre premier produit.</div>');
+}
+function productForm(id){
+  const p=db.products.find(x=>x.id===id)||{name:'',cost:'',price:'',stock:'',min:5};
+  openModal(id?'Modifier le produit':'Nouveau produit',`
+    <label>Nom du produit</label><input id="f_name" value="${esc(p.name)}">
+    <label>Prix d'achat (FCFA)</label><input id="f_cost" type="number" inputmode="numeric" value="${p.cost}">
+    <label>Prix de vente (FCFA)</label><input id="f_price" type="number" inputmode="numeric" value="${p.price}">
+    <label>Quantité en stock</label><input id="f_stock" type="number" inputmode="numeric" value="${p.stock}">
+    <label>Alerte stock faible (à partir de)</label><input id="f_min" type="number" inputmode="numeric" value="${p.min}">
+    ${id?`<button class="btn danger" onclick="delProduct('${id}')">Supprimer ce produit</button>`:''}`,
+  ()=>{
+    const name=$('#f_name').value.trim(),price=num('#f_price');
+    if(!name){alert('Entrez le nom du produit.');return;}
+    if(price<=0){alert('Entrez un prix de vente.');return;}
+    const data={name,cost:num('#f_cost'),price,stock:Math.max(0,Math.floor(num('#f_stock'))),min:Math.max(0,Math.floor(num('#f_min')))};
+    if(id)Object.assign(db.products.find(x=>x.id===id),data);else db.products.push(Object.assign({id:uid()},data));
+    save();closeModal();render();
+  });
+}
+function delProduct(id){
+  if(!confirm('Supprimer ce produit ? Les ventes déjà enregistrées sont conservées.'))return;
+  db.products=db.products.filter(p=>p.id!==id);save();closeModal();render();
+}
+function addStock(id){
+  const p=db.products.find(x=>x.id===id);
+  const q=parseInt(prompt('Quantité à ajouter pour '+p.name+' :'),10);
+  if(q>0){p.stock+=q;save();render();}
+}
+
+/* ---------- Ventes ---------- */
+function viewSales(){
+  const list=db.sales.slice().reverse().slice(0,60);
+  $('#view').innerHTML=`<button class="btn" onclick="saleForm()">+ Nouvelle vente</button><div style="height:10px"></div>`+
+  (list.length?list.map(s=>{
+    const c=db.clients.find(x=>x.id===s.clientId);
+    return `<div class="card">
+      <div class="line"><b>${esc(s.name)} × ${s.qty}</b><b>${fcfa(s.total)}</b></div>
+      <div class="muted">${fdate(s.date)} · Bénéfice ${fcfa(s.profit)}${c?' · '+esc(c.name):''}</div>
+      <div class="line" style="margin-top:6px"><span class="tag ${s.paid?'ok':''}">${s.paid?'Payé':'À crédit'}</span>
+      <button class="btn ghost small" onclick="delSale('${s.id}')">Annuler la vente</button></div>
+    </div>`;}).join(''):'<div class="empty">Aucune vente enregistrée.</div>');
+}
+function saleForm(){
+  const avail=db.products.filter(p=>p.stock>0);
+  if(!avail.length){alert("Ajoutez d'abord un produit avec du stock.");return;}
+  openModal('Nouvelle vente',`
+    <label>Produit</label><select id="f_prod" onchange="syncPrice()">${avail.map(p=>`<option value="${p.id}">${esc(p.name)} (stock ${p.stock})</option>`).join('')}</select>
+    <label>Quantité</label><input id="f_qty" type="number" inputmode="numeric" value="1">
+    <label>Prix unitaire (FCFA)</label><input id="f_price" type="number" inputmode="numeric" value="${avail[0].price}">
+    <label>Client (facultatif)</label><select id="f_client"><option value="">— Client de passage —</option>${db.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+    <label>Paiement</label><select id="f_paid"><option value="1">Payé</option><option value="0">À crédit (dette du client)</option></select>`,
+  ()=>{
+    const p=db.products.find(x=>x.id===$('#f_prod').value);
+    const qty=Math.floor(num('#f_qty')),price=num('#f_price'),clientId=$('#f_client').value,paid=$('#f_paid').value==='1';
+    if(!p||qty<=0){alert('Quantité invalide.');return;}
+    if(qty>p.stock){alert('Stock insuffisant : '+p.stock+' disponible(s).');return;}
+    if(price<=0){alert('Prix invalide.');return;}
+    if(!paid&&!clientId){alert('Choisissez un client pour une vente à crédit.');return;}
+    db.sales.push({id:uid(),date:today(),productId:p.id,name:p.name,qty,price,cost:p.cost,total:qty*price,profit:qty*(price-p.cost),clientId,paid});
+    p.stock-=qty;save();closeModal();render();
+  },'Valider la vente');
+}
+function syncPrice(){
+  const p=db.products.find(x=>x.id===$('#f_prod').value);
+  if(p)$('#f_price').value=p.price;
+}
+function delSale(id){
+  if(!confirm('Annuler cette vente ? Le stock sera remis.'))return;
+  const s=db.sales.find(x=>x.id===id);
+  const p=db.products.find(x=>x.id===s.productId);
+  if(p)p.stock+=s.qty;
+  db.sales=db.sales.filter(x=>x.id!==id);save();render();
+}
+
+/* ---------- Dépenses ---------- */
+function viewExpenses(){
+  const m=today().slice(0,7);
+  const list=db.expenses.slice().sort((a,b)=>b.date.localeCompare(a.date));
+  $('#view').innerHTML=`<div class="card line"><span>Total du mois</span><b class="neg">${fcfa(sum(db.expenses.filter(e=>e.date.slice(0,7)===m),e=>e.amount))}</b></div>
+  <button class="btn" onclick="expenseForm()">+ Nouvelle dépense</button><div style="height:10px"></div>`+
+  (list.length?list.map(e=>`<div class="card line"><div><b>${esc(e.label)}</b><div class="muted">${fdate(e.date)}</div></div>
+    <div style="text-align:right"><b>${fcfa(e.amount)}</b><br><a href="#" onclick="delExpense('${e.id}');return false" class="muted">Supprimer</a></div></div>`).join(''):'<div class="empty">Aucune dépense enregistrée.</div>');
+}
+function expenseForm(){
+  openModal('Nouvelle dépense',`
+    <label>Description (transport, loyer, électricité…)</label><input id="f_label">
+    <label>Montant (FCFA)</label><input id="f_amount" type="number" inputmode="numeric">
+    <label>Date</label><input id="f_date" type="date" value="${today()}">`,
+  ()=>{
+    const label=$('#f_label').value.trim(),amount=num('#f_amount'),date=$('#f_date').value||today();
+    if(!label||amount<=0){alert('Entrez une description et un montant.');return;}
+    db.expenses.push({id:uid(),label,amount,date});save();closeModal();render();
+  });
+}
+function delExpense(id){
+  if(!confirm('Supprimer cette dépense ?'))return;
+  db.expenses=db.expenses.filter(e=>e.id!==id);save();render();
+}
+
+/* ---------- Clients ---------- */
+function viewClients(){
+  $('#view').innerHTML=`<button class="btn" onclick="clientForm()">+ Nouveau client</button><div style="height:10px"></div>`+
+  (db.clients.length?db.clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>{
+    const d=clientDebt(c.id),n=db.sales.filter(s=>s.clientId===c.id).length;
+    return `<div class="card">
+      <div class="line"><b>${esc(c.name)}</b><span class="tag ${d?'':'ok'}">${d?'Doit '+fcfa(d):'À jour'}</span></div>
+      <div class="muted">${esc(c.phone||'Pas de numéro')} · ${n} achat(s)</div>
+      <div class="row" style="margin-top:8px">
+        ${d?`<button class="btn small" onclick="settle('${c.id}')">Encaisser la dette</button>`:''}
+        ${c.phone?`<a class="btn ghost small" style="text-decoration:none;text-align:center" href="tel:${esc(c.phone)}">Appeler</a>`:''}
+        <button class="btn ghost small" onclick="delClient('${c.id}')">Supprimer</button>
+      </div></div>`;}).join(''):'<div class="empty">Aucun client.</div>');
+}
+function clientForm(){
+  openModal('Nouveau client',`
+    <label>Nom</label><input id="f_name">
+    <label>Téléphone (facultatif)</label><input id="f_phone" type="tel" inputmode="tel">`,
+  ()=>{
+    const name=$('#f_name').value.trim();
+    if(!name){alert('Entrez le nom du client.');return;}
+    db.clients.push({id:uid(),name,phone:$('#f_phone').value.trim()});save();closeModal();render();
+  });
+}
+function settle(id){
+  const c=db.clients.find(x=>x.id===id);
+  if(!confirm(c.name+' a payé toute sa dette ('+fcfa(clientDebt(id))+') ?'))return;
+  db.sales.forEach(s=>{if(s.clientId===id)s.paid=true;});save();render();
+}
+function delClient(id){
+  if(clientDebt(id)>0&&!confirm('Ce client a une dette. Supprimer quand même ?'))return;
+  if(!confirm('Supprimer ce client ?'))return;
+  db.clients=db.clients.filter(c=>c.id!==id);
+  db.sales.forEach(s=>{if(s.clientId===id){s.clientId='';s.paid=true;}});
+  save();render();
+}
+
+render();
+if('serviceWorker' in navigator&&location.protocol.indexOf('http')===0){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
